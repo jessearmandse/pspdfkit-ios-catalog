@@ -5,6 +5,8 @@
 //  Please see License for details. This notice may not be removed from this file.
 //
 
+import MobileCoreServices
+
 class ComparisonExample: IndustryExample {
 
     override init() {
@@ -24,6 +26,13 @@ class ComparisonExample: IndustryExample {
 }
 
 private class ComparisonViewController: PDFTabbedViewController, DocumentAlignmentViewControllerDelegate, PDFTabbedViewControllerDelegate {
+
+    lazy var importButtonItem: UIBarButtonItem = {
+        let importButton = UIButton(type: .custom)
+        importButton.setImage(UIImage(systemName: "square.and.arrow.down.on.square"), for: .normal)
+        importButton.addTarget(self, action: #selector(importDocument(_:)), for: .touchUpInside)
+        return UIBarButtonItem(customView: importButton)
+    }()
 
     /// Initialize the receiver with the reference to the parent example.
     init(example: IndustryExample) {
@@ -62,7 +71,7 @@ private class ComparisonViewController: PDFTabbedViewController, DocumentAlignme
         navigationItem.leftItemsSupplementBackButton = true
         pdfController.navigationItem.title = "Comparison"
         pdfController.navigationItem.leftBarButtonItems = [moreInfo.barButton]
-        pdfController.navigationItem.rightBarButtonItems = []
+        pdfController.navigationItem.rightBarButtonItems = [importButtonItem]
         // Manually add the "Align..." button to the user interface view.
         // `PDFTabbedViewController` uses a single `PDFViewController` for all
         // tabs, so you only need to add it once and then manage its visibility.
@@ -84,10 +93,22 @@ private class ComparisonViewController: PDFTabbedViewController, DocumentAlignme
     // MARK: Documents
 
     /// The old version of the document.
-    private lazy var oldDocument: Document = AssetLoader.document(for: "FloorPlan-A.pdf")
+    private lazy var oldDocument: Document = AssetLoader.document(for: "FloorPlan-A.pdf") {
+        didSet {
+            removeDocument(oldValue, animated: false)
+
+            refreshDocuments()
+        }
+    }
 
     /// The new version of the document.
-    private lazy var newDocument: Document = AssetLoader.document(for: "FloorPlan-B.pdf")
+    private lazy var newDocument: Document = AssetLoader.document(for: "FloorPlan-B.pdf") {
+        didSet {
+            removeDocument(oldValue, animated: false)
+
+            refreshDocuments()
+        }
+    }
 
     /// The comparison document.
     private var comparisonDocument: Document? {
@@ -99,6 +120,23 @@ private class ComparisonViewController: PDFTabbedViewController, DocumentAlignme
                 insertDocument(newValue, at: 2, makeVisible: true, animated: false)
             }
         }
+    }
+
+    private func refreshDocuments() {
+        if documents.endIndex > 0 {
+            removeDocument(at: 0, animated: false)
+        }
+
+        if documents.endIndex > 1 {
+            removeDocument(at: 1, animated: false)
+        }
+
+        insertDocument(oldDocument, at: 0, makeVisible: false, animated: false)
+        insertDocument(newDocument, at: 1, makeVisible: false, animated: false)
+
+        // Generate the initial (misaligned) comparison document.
+        let processor = ComparisonProcessor(configuration: .default())
+        comparisonDocument = try! processor.comparisonDocument(oldDocument: oldDocument, newDocument: newDocument)
     }
 
     // MARK: User Interface
@@ -167,6 +205,32 @@ private class ComparisonViewController: PDFTabbedViewController, DocumentAlignme
         dismiss(animated: true)
     }
 
+    private func presentDocumentPicker() {
+        let picker = UIDocumentPickerViewController(documentTypes: [kUTTypePDF as String], in: .open)
+        picker.delegate = self
+        picker.popoverPresentationController?.barButtonItem = importButtonItem
+        picker.allowsMultipleSelection = true
+        present(picker, animated: true, completion: nil)
+    }
+
+    @objc private func importDocument(_ button: UIButton) {
+        let alert = UIAlertController(
+            title: "Select 2 Documents",
+            message: """
+            We will only select the first 2 documents you selected for comparison.
+            """,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(
+            title: "Continue",
+            style: .cancel,
+            handler: { [self] _ in
+                presentDocumentPicker()
+            }
+        ))
+        present(alert, animated: true)
+    }
+
     // MARK: DocumentAlignmentViewControllerDelegate
 
     func documentAlignmentViewController(_ sender: DocumentAlignmentViewController, didFinishWithComparisonDocument document: Document) {
@@ -186,6 +250,40 @@ private class ComparisonViewController: PDFTabbedViewController, DocumentAlignme
 
     func tabbedPDFController(_ tabbedPDFController: PDFTabbedViewController, didChangeVisibleDocument oldVisibleDocument: Document?) {
         updateAlignButtonVisibility()
+    }
+
+}
+
+extension ComparisonViewController: UIDocumentPickerDelegate {
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        if urls.endIndex > 1 {
+            let selectedURLs = urls[0...1]
+
+            let documentAURL = selectedURLs[0]
+            let documentBURL = selectedURLs[1]
+
+            let documentA = Document(url: documentAURL)
+            print("Document A: \(documentAURL)")
+
+            oldDocument = documentA
+
+            let documentB = Document(url: documentBURL)
+            print("Document B: \(documentBURL)")
+
+            newDocument = documentB
+            return
+        }
+
+        guard let selectedURL = urls.first else {
+            return
+        }
+
+        print("Document B: \(selectedURL)")
+        newDocument = Document(url: selectedURL)
     }
 
 }
